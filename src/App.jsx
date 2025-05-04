@@ -1,256 +1,452 @@
-import React, { useState, useRef, createRef } from "react";
+// src/App.jsx
+import React, { useState, useEffect } from "react";
+import { parseRubric } from "./utils/parseRubric";
+import {
+  Box,
+  Text,
+  Flex,
+  Textarea,
+  Button,
+  Heading,
+  Accordion,
+  AccordionItem,
+  AccordionButton,
+  AccordionPanel,
+  AccordionIcon,
+  List,
+  ListItem,
+  ListIcon,
+  VStack,
+  Input,
+  Progress,
+  Tooltip,
+  Icon,
+  useColorModeValue,
+} from "@chakra-ui/react";
+import {
+  CheckCircleIcon,
+  WarningIcon,
+  InfoOutlineIcon,
+} from "@chakra-ui/icons";
 import Highlighter from "react-highlight-words";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as ReTooltip,
+} from "recharts";
 
-function App() {
-  // ─── State ───────────────────────────────────────────────────────────
+export default function App() {
+  // ── State ─────────────────────────────────────────────────────────────
   const [essayText, setEssayText] = useState("");
   const [rubricText, setRubricText] = useState("");
+  const [parsedRubric, setParsedRubric] = useState({ flat: [], byGrade: {} });
   const [sections, setSections] = useState([]);
-  const [semanticMatches, setSemanticMatches] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [semantic, setSemantic] = useState([]);
   const [met, setMet] = useState([]);
   const [missing, setMissing] = useState([]);
-  const [suggestions, setSuggestions] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // refs for each section to enable scrolling
-  const sectionRefs = useRef({});
+  const [essayDrag, setEssayDrag] = useState(false);
+  const [rubricDrag, setRubricDrag] = useState(false);
 
-  // ─── File → Text Helper ──────────────────────────────────────────────
-  const readFile = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsText(file);
-    });
+  // re-parse rubric whenever the text changes
+  useEffect(() => {
+    setParsedRubric(parseRubric(rubricText));
+  }, [rubricText]);
 
-  // ─── Main Analysis ────────────────────────────────────────────────────
+  // ALWAYS prefer flat lines if present, else fall back to byGrade
+  const rubricItems =
+    parsedRubric.flat?.length > 0
+      ? parsedRubric.flat
+      : parsedRubric.byGrade
+      ? Object.values(parsedRubric.byGrade).flat()
+      : [];
+
+  // ── File helpers ───────────────────────────────────────────────────────
+  const readFile = (file, setter) => {
+    const reader = new FileReader();
+    reader.onload = () => setter(reader.result.toString());
+    reader.readAsText(file);
+  };
+  const handleEssayUpload = (e) => {
+    const f = e.target.files?.[0];
+    if (f) readFile(f, setEssayText);
+  };
+  const handleRubricUpload = (e) => {
+    const f = e.target.files?.[0];
+    if (f) readFile(f, setRubricText);
+  };
+
+  // ── Drag & Drop ───────────────────────────────────────────────────────
+  const essayDrop = (e) => {
+    e.preventDefault();
+    setEssayDrag(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) readFile(f, setEssayText);
+  };
+  const rubricDrop = (e) => {
+    e.preventDefault();
+    setRubricDrag(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) readFile(f, setRubricText);
+  };
+
+  // ── Custom highlight tag ──────────────────────────────────────────────
+  const HighlightTag = ({ children, highlightIndex, ...props }) => {
+    const all = [...met, ...missing];
+    const term = all[highlightIndex];
+    const isMet = met.includes(term);
+    return (
+      <Text
+        as="span"
+        bg={isMet ? "green.200" : undefined}
+        textDecoration={isMet ? undefined : "underline"}
+        textDecorationColor={isMet ? undefined : "red.500"}
+        {...props}
+      >
+        {children}
+      </Text>
+    );
+  };
+
+  // ── Main Analysis ─────────────────────────────────────────────────────
   const runAnalysis = async () => {
     setLoading(true);
     setSections([]);
-    setSemanticMatches([]);
+    setMatches([]);
+    setSemantic([]);
     setMet([]);
     setMissing([]);
-    setSuggestions("");
+    setSuggestions([]);
 
-    // build rubric array
-    const rubricList = rubricText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
+    // sanitize into a string[] for the API
+    const rubricArray = rubricItems.map((t) => t.trim()).filter(Boolean);
 
-    // fetch sections
+    // bail if still empty
+    if (rubricArray.length === 0) {
+      alert(
+        "Please provide at least one rubric criterion before running analysis."
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
-      const respS = await fetch("http://127.0.0.1:8001/structure", {
+      // 1️⃣ Structure call
+      let res = await fetch("/structure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: essayText }),
       });
-      setSections(await respS.json());
-    } catch (err) {
-      console.error("Structure error:", err);
-      setSections([]);
-    }
+      if (!res.ok) throw new Error("Structure failed");
+      setSections(await res.json());
 
-    // fetch semantic matches
-    try {
-      const respA = await fetch("http://127.0.0.1:8001/analyze", {
+      // 2️⃣ Analyze call
+      res = await fetch("/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: essayText, rubric: rubricList }),
+        body: JSON.stringify({ text: essayText, rubric: rubricArray }),
       });
-      const matches = await respA.json();
-      setSemanticMatches(matches);
-
-      // derive met / missing
-      const metArr = matches.map((m) => m.criterion);
-      const missArr = rubricList.filter((c) => !metArr.includes(c));
-      setMet(metArr);
-      setMissing(missArr);
-
-      // rule-based suggestions for gaps
-      if (missArr.length) {
-        const bullets = missArr.map(
-          (c) => `- Try adding a sentence that explicitly addresses **${c}**.`
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        console.error(
+          "🛑 /analyze errors:\n",
+          JSON.stringify(errBody, null, 2)
         );
-        setSuggestions(bullets.join("\n"));
+        const msg = Array.isArray(errBody)
+          ? errBody.map((e) => e.msg || JSON.stringify(e)).join("; ")
+          : errBody.detail || res.status;
+        throw new Error("Analyze failed: " + msg);
       }
-    } catch (err) {
-      console.error("Analyze error:", err);
-    }
 
-    setLoading(false);
+      const analysis = await res.json();
+      setMatches(analysis);
+
+      // 3️⃣ Chart data
+      setSemantic(
+        analysis.map((m) => ({
+          criterion: m.criterion,
+          score: Math.round(m.score * 100),
+        }))
+      );
+
+      // 4️⃣ Met vs missing
+      const metTexts = analysis.map((m) => m.criterion);
+      setMet(metTexts);
+      setMissing(rubricArray.filter((t) => !metTexts.includes(t)));
+
+      // 5️⃣ Suggestions
+      setSuggestions(
+        rubricArray
+          .filter((t) => !metTexts.includes(t))
+          .map((t) => `Consider adding **${t}**.`)
+      );
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // ─── Render ───────────────────────────────────────────────────────────
+  // ── Progress bar ──────────────────────────────────────────────────────
+  const pct = rubricItems.length
+    ? Math.round((met.length / rubricItems.length) * 100)
+    : 0;
+  const colorScheme = pct < 50 ? "red" : pct < 80 ? "orange" : "green";
+  const dragBorder = useColorModeValue("blue.300", "blue.600");
+
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-6">
-      <h1 className="text-3xl font-bold">Rubric Analyzer</h1>
+    <Box p={6}>
+      <Heading mb={6}>Rubric Analyzer</Heading>
 
-      {/* Essay upload + paste */}
-      <div className="flex gap-4">
-        <input
-          type="file"
-          accept=".txt"
-          className="border p-2 flex-1"
-          onChange={(e) =>
-            e.target.files[0] && readFile(e.target.files[0]).then(setEssayText)
-          }
-        />
-      </div>
-      <textarea
-        rows={8}
-        className="w-full border p-2"
-        placeholder="Or paste essay here…"
-        value={essayText}
-        onChange={(e) => setEssayText(e.target.value)}
-      />
+      {/* Inputs */}
+      <Flex gap={4} mb={4}>
+        {/* Essay Input */}
+        <Box flex={1}>
+          <Flex justify="space-between" mb={2}>
+            <Heading size="sm">Essay Input</Heading>
+            <Input
+              type="file"
+              accept=".txt"
+              size="sm"
+              onChange={handleEssayUpload}
+            />
+          </Flex>
+          <Box
+            p={2}
+            mb={2}
+            border="2px dashed"
+            borderColor={essayDrag ? dragBorder : "transparent"}
+            borderRadius="md"
+            onDragOver={(e) => e.preventDefault()}
+            onDragEnter={(e) => (e.preventDefault(), setEssayDrag(true))}
+            onDragLeave={(e) => (e.preventDefault(), setEssayDrag(false))}
+            onDrop={essayDrop}
+          >
+            <Textarea
+              rows={6}
+              placeholder="Drop or paste essay…"
+              value={essayText}
+              onChange={(e) => setEssayText(e.target.value)}
+            />
+          </Box>
+        </Box>
 
-      {/* Rubric upload + paste */}
-      <div className="flex gap-4">
-        <input
-          type="file"
-          accept=".txt"
-          className="border p-2 flex-1"
-          onChange={(e) =>
-            e.target.files[0] && readFile(e.target.files[0]).then(setRubricText)
-          }
-        />
-      </div>
-      <textarea
-        rows={6}
-        className="w-full border p-2"
-        placeholder="Or paste rubric (one per line)…"
-        value={rubricText}
-        onChange={(e) => setRubricText(e.target.value)}
-      />
+        {/* Rubric Input */}
+        <Box flex={1}>
+          <Flex justify="space-between" mb={2}>
+            <Heading size="sm">Rubric Input</Heading>
+            <Input
+              type="file"
+              accept=".txt"
+              size="sm"
+              onChange={handleRubricUpload}
+            />
+          </Flex>
+          <Box
+            p={2}
+            mb={2}
+            border="2px dashed"
+            borderColor={rubricDrag ? dragBorder : "transparent"}
+            borderRadius="md"
+            onDragOver={(e) => e.preventDefault()}
+            onDragEnter={(e) => (e.preventDefault(), setRubricDrag(true))}
+            onDragLeave={(e) => (e.preventDefault(), setRubricDrag(false))}
+            onDrop={rubricDrop}
+          >
+            <Textarea
+              rows={6}
+              placeholder="Drop or paste rubric…"
+              value={rubricText}
+              onChange={(e) => setRubricText(e.target.value)}
+            />
+          </Box>
+        </Box>
+      </Flex>
 
-      {/* Run Analysis */}
-      <button
-        onClick={runAnalysis}
-        disabled={loading}
-        className="bg-blue-600 text-white px-5 py-2 rounded disabled:opacity-50"
+      <Tooltip
+        label="Please add at least one criterion to your rubric"
+        isDisabled={rubricItems.length > 0}
       >
-        {loading ? "Analyzing…" : "Run Analysis"}
-      </button>
+        <Button
+          colorScheme="blue"
+          onClick={runAnalysis}
+          isLoading={loading}
+          mb={4}
+          isDisabled={rubricItems.length === 0}
+          leftIcon={rubricItems.length === 0 ? <InfoOutlineIcon /> : undefined}
+        >
+          Run Analysis
+        </Button>
+      </Tooltip>
 
-      {/* Highlighted Essay Pane */}
-      <div className="relative w-full border p-2 h-48 overflow-auto">
-        {/* Invisible base layer to preserve layout */}
-        <pre className="invisible whitespace-pre-wrap">{essayText}</pre>
-
-        {/* Red underline for missing */}
-        <Highlighter
-          highlightClassName="red-underline"
-          searchWords={missing}
-          autoEscape={true}
-          textToHighlight={essayText}
-          className="absolute inset-0"
-        />
-
-        {/* Green clickable highlights for met */}
-        <Highlighter
-          highlightClassName="bg-green-200 cursor-pointer"
-          searchWords={met}
-          autoEscape={true}
-          textToHighlight={essayText}
-          className="absolute inset-0"
-          highlightTag={(chunks) => {
-            const criterion = chunks.children;
-            const match = semanticMatches.find(
-              (m) => m.criterion === criterion
-            );
-            const secName = match?.section;
-            return (
-              <mark
-                onClick={() => {
-                  const ref = sectionRefs.current[secName];
-                  if (ref?.current) {
-                    ref.current.scrollIntoView({
-                      behavior: "smooth",
-                      block: "start",
-                    });
-                  }
-                }}
-              >
-                {criterion}
-              </mark>
-            );
-          }}
-        />
-      </div>
+      {/* Progress */}
+      <Box mb={6}>
+        <Progress value={pct} size="sm" colorScheme={colorScheme} />
+        <Text fontSize="xs" mt={1}>
+          {met.length} / {rubricItems.length} criteria met ({pct}%)
+        </Text>
+      </Box>
 
       {/* Results */}
-      <div className="space-y-6">
-        {/* Sections */}
-        {sections.length > 0 && (
-          <section>
-            <h2 className="text-2xl font-semibold">📑 Sections</h2>
-            {sections.map((sec, i) => {
-              if (!sectionRefs.current[sec.name]) {
-                sectionRefs.current[sec.name] = createRef();
-              }
-              return (
-                <div
-                  key={i}
-                  ref={sectionRefs.current[sec.name]}
-                  className="border-l-4 pl-3 mb-3"
-                >
-                  <strong>{sec.name}:</strong>
-                  <p className="whitespace-pre-wrap">{sec.text}</p>
-                </div>
-              );
-            })}
-          </section>
-        )}
+      <Flex gap={6} align="flex-start">
+        {/* Essay Preview */}
+        <Box
+          flex={2}
+          p={4}
+          bg="gray.50"
+          borderRadius="md"
+          minH="300px"
+          overflow="auto"
+          fontFamily="mono"
+          whiteSpace="pre-wrap"
+        >
+          <Heading size="sm" mb={2}>
+            Essay Preview
+          </Heading>
+          <Highlighter
+            highlightTag={HighlightTag}
+            searchWords={[...met, ...missing]}
+            autoEscape
+            textToHighlight={essayText || "Your essay appears here…"}
+          />
+        </Box>
 
-        {/* Semantic Matches */}
-        {semanticMatches.length > 0 && (
-          <section>
-            <h2 className="text-2xl font-semibold">🔍 Semantic Matches</h2>
-            <ul className="list-decimal list-inside">
-              {semanticMatches.map((m, i) => (
-                <li key={i}>
-                  {m.criterion} — {m.score.toFixed(2)} in <em>{m.section}</em>
-                </li>
+        {/* Right Panels */}
+        <VStack flex={1} spacing={4} align="stretch">
+          {/* Sections */}
+          <Box p={4} bg="gray.50" borderRadius="md">
+            <Heading size="sm" mb={2}>
+              Sections
+            </Heading>
+            <Accordion allowToggle>
+              {sections.map((sec, i) => (
+                <AccordionItem key={i}>
+                  <AccordionButton>
+                    <Box flex="1" textAlign="left">
+                      {sec.name}
+                    </Box>
+                    <AccordionIcon />
+                  </AccordionButton>
+                  <AccordionPanel whiteSpace="pre-wrap">
+                    {sec.text}
+                  </AccordionPanel>
+                </AccordionItem>
               ))}
-            </ul>
-          </section>
-        )}
+            </Accordion>
+          </Box>
 
-        {/* Met & Missing */}
-        <section>
-          <h2 className="text-2xl font-semibold">✅ Met ({met.length})</h2>
-          <ul className="list-disc list-inside">
-            {met.map((c, i) => (
-              <li key={i}>{c}</li>
-            ))}
-          </ul>
-        </section>
+          {/* Semantic Matches */}
+          <Box p={4} bg="gray.50" borderRadius="md">
+            <Heading size="sm" mb={2}>
+              Semantic Matches
+            </Heading>
+            <Accordion allowToggle>
+              {matches.map((m, i) => (
+                <AccordionItem key={i} border="none">
+                  <AccordionButton
+                    _expanded={{ bg: "green.100" }}
+                    px={2}
+                    py={1}
+                    borderRadius="md"
+                  >
+                    <Box
+                      flex="1"
+                      textAlign="left"
+                      display="flex"
+                      alignItems="center"
+                    >
+                      <Icon as={CheckCircleIcon} color="green.500" mr={2} />
+                      {m.criterion} — {Math.round(m.score * 100)}%
+                    </Box>
+                    <AccordionIcon />
+                  </AccordionButton>
+                  <AccordionPanel pt={0} pb={2} pl={6}>
+                    <Text fontSize="xs" color="gray.600" mb={1}>
+                      Section: {m.section}
+                    </Text>
+                    <List spacing={1}>
+                      {m.snippets.map((s, j) => (
+                        <ListItem key={j}>
+                          <Text as="i" fontSize="sm">
+                            “{s.sentence.trim()}”
+                          </Text>
+                        </ListItem>
+                      ))}
+                    </List>
+                  </AccordionPanel>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </Box>
 
-        <section>
-          <h2 className="text-2xl font-semibold">
-            ❌ Missing ({missing.length})
-          </h2>
-          <ul className="list-disc list-inside">
-            {missing.map((c, i) => (
-              <li key={i}>{c}</li>
-            ))}
-          </ul>
-        </section>
+          {/* Match Score Chart */}
+          <Box p={4} bg="gray.50" borderRadius="md">
+            <Heading size="sm" mb={2}>
+              Match Score Chart
+            </Heading>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={semantic}
+                margin={{ top: 5, right: 20, bottom: 5, left: 0 }}
+              >
+                <XAxis dataKey="criterion" tick={{ fontSize: 12 }} />
+                <YAxis />
+                <ReTooltip formatter={(v) => `${v}%`} />
+                <Bar dataKey="score" fill="#3182CE" />
+              </BarChart>
+            </ResponsiveContainer>
+          </Box>
 
-        {/* Suggestions */}
-        {suggestions && (
-          <section>
-            <h2 className="text-2xl font-semibold">💡 Suggestions</h2>
-            <pre className="whitespace-pre-wrap bg-gray-100 p-3 rounded">
-              {suggestions}
-            </pre>
-          </section>
-        )}
-      </div>
-    </div>
+          {/* Met Criteria */}
+          <Box p={4} bg="gray.50" borderRadius="md">
+            <Heading size="sm" mb={2}>
+              Met Criteria
+            </Heading>
+            <List spacing={1}>
+              {met.map((c, i) => (
+                <ListItem key={i}>
+                  <ListIcon as={CheckCircleIcon} color="green.500" />
+                  {c}
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+
+          {/* Missing Criteria */}
+          <Box p={4} bg="gray.50" borderRadius="md">
+            <Heading size="sm" mb={2}>
+              Missing Criteria
+            </Heading>
+            <List spacing={1}>
+              {missing.map((c, i) => (
+                <ListItem key={i}>
+                  <ListIcon as={WarningIcon} color="red.500" />
+                  {c}
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+
+          {/* Suggestions */}
+          <Box p={4} bg="gray.50" borderRadius="md">
+            <Heading size="sm" mb={2}>
+              Suggestions
+            </Heading>
+            <List spacing={1} styleType="disc" pl={4}>
+              {suggestions.map((s, i) => (
+                <ListItem key={i}>{s}</ListItem>
+              ))}
+            </List>
+          </Box>
+        </VStack>
+      </Flex>
+    </Box>
   );
 }
-
-export default App;

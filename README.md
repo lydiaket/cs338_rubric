@@ -1,12 +1,46 @@
-# React + Vite
+## Backend Setup
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+### 1. Create & activate a virtual environment
 
-Currently, two official plugins are available:
+```bash
+python3 -m venv venv
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+# macOS/Linux
+source venv/bin/activate
 
-## Expanding the ESLint configuration
+# Windows (PowerShell)
+\venv\Scripts\activate
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+2. Install Python dependencies
+pip install -r requirements.txt
+3. Run the FastAPI server
+
+uvicorn main:app --reload
+The API will be live at: http://localhost:8000
+
+Interactive docs: http://localhost:8000/docs
+
+Frontend Setup
+In a separate terminal, from the project root:
+
+1. Install JS dependencies
+npm install
+2. Start the dev server
+npm run dev
+Your frontend will typically be available at http://localhost:3000
+
+Verification
+Backend: open http://localhost:8000/docs to inspect and call endpoints.
+
+Frontend: navigate to http://localhost:3000 (or the URL shown in your console).
+
+Shutting Down
+1. Stop servers
+Backend terminal: Ctrl+C
+
+Frontend terminal: Ctrl+C
+
+2. Deactivate virtual environment
+deactivate
+```
