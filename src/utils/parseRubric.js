@@ -1,24 +1,22 @@
+// src/utils/parseRubric.js
 export function parseRubric(rubricText) {
   const lines = rubricText
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // only treat a line as a “grade heading” if it’s exactly A–F or A. B) etc.
   const headingRe = /^([A-F])\.?\)?$/i;
-
   let currentGrade = null;
   const rubric = { flat: [], byGrade: {} };
 
   for (let raw of lines) {
     let line = raw.replace(/^[-*]\s*/, ""); // strip bullets
     if (line.includes(":")) {
-      line = line.split(":")[0].trim(); // drop anything after a colon
+      line = line.split(":")[0].trim();
     }
 
     const h = line.match(headingRe);
     if (h) {
-      // a real letter‐grade heading
       currentGrade = h[1].toUpperCase();
       rubric.byGrade[currentGrade] = [];
     } else if (currentGrade) {
@@ -28,7 +26,7 @@ export function parseRubric(rubricText) {
     }
   }
 
-  // if we never actually collected any grades, toss the empty `byGrade`
+  // Remove empty byGrade if nothing was grouped
   if (
     Object.keys(rubric.byGrade).every((g) => rubric.byGrade[g].length === 0)
   ) {

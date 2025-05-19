@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useState, useEffect } from "react";
 import { parseRubric } from "./utils/parseRubric";
 import {
@@ -15,7 +14,6 @@ import {
   AccordionIcon,
   List,
   ListItem,
-  ListIcon,
   VStack,
   Input,
   Progress,
@@ -39,9 +37,12 @@ import {
 } from "recharts";
 
 export default function App() {
-  // ── State ─────────────────────────────────────────────────────────────
+  // ——— State ——————————————————————————————————————————————————
   const [essayText, setEssayText] = useState("");
   const [rubricText, setRubricText] = useState("");
+  const [essayFile, setEssayFile] = useState(null);
+  const [rubricFile, setRubricFile] = useState(null);
+
   const [parsedRubric, setParsedRubric] = useState({ flat: [], byGrade: {} });
   const [sections, setSections] = useState([]);
   const [matches, setMatches] = useState([]);
@@ -54,67 +55,112 @@ export default function App() {
   const [essayDrag, setEssayDrag] = useState(false);
   const [rubricDrag, setRubricDrag] = useState(false);
 
-  // re-parse rubric whenever the text changes
+  // ——— Parse rubric whenever rubricText changes —————————————————————
   useEffect(() => {
     setParsedRubric(parseRubric(rubricText));
   }, [rubricText]);
 
-  // ALWAYS prefer flat lines if present, else fall back to byGrade
+  // flatten rubric items for sending to backend
   const rubricItems =
     parsedRubric.flat?.length > 0
       ? parsedRubric.flat
       : parsedRubric.byGrade
       ? Object.values(parsedRubric.byGrade).flat()
       : [];
+  const chartColor = useColorModeValue("#3182CE", "#63B3ED");
 
-  // ── File helpers ───────────────────────────────────────────────────────
-  const readFile = (file, setter) => {
-    const reader = new FileReader();
-    reader.onload = () => setter(reader.result.toString());
-    reader.readAsText(file);
-  };
+  // ——— File upload handlers ———————————————————————————————————————
   const handleEssayUpload = (e) => {
     const f = e.target.files?.[0];
-    if (f) readFile(f, setEssayText);
-  };
-  const handleRubricUpload = (e) => {
-    const f = e.target.files?.[0];
-    if (f) readFile(f, setRubricText);
+    if (!f) return;
+    if (f.type === "application/pdf") {
+      setEssayFile(f);
+      setEssayText("");
+    } else {
+      setEssayFile(null);
+      const reader = new FileReader();
+      reader.onload = () => setEssayText(reader.result.toString());
+      reader.readAsText(f);
+    }
   };
 
-  // ── Drag & Drop ───────────────────────────────────────────────────────
+  const handleRubricUpload = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.type === "application/pdf") {
+      setRubricFile(f);
+      setRubricText("");
+    } else {
+      setRubricFile(null);
+      const reader = new FileReader();
+      reader.onload = () => setRubricText(reader.result.toString());
+      reader.readAsText(f);
+    }
+  };
+
+  // ——— Drag & drop handlers —————————————————————————————————————
   const essayDrop = (e) => {
     e.preventDefault();
     setEssayDrag(false);
     const f = e.dataTransfer.files?.[0];
-    if (f) readFile(f, setEssayText);
+    if (!f) return;
+    if (f.type === "application/pdf") {
+      setEssayFile(f);
+      setEssayText("");
+    } else {
+      setEssayFile(null);
+      const reader = new FileReader();
+      reader.onload = () => setEssayText(reader.result.toString());
+      reader.readAsText(f);
+    }
   };
+
   const rubricDrop = (e) => {
     e.preventDefault();
     setRubricDrag(false);
     const f = e.dataTransfer.files?.[0];
-    if (f) readFile(f, setRubricText);
+    if (!f) return;
+    if (f.type === "application/pdf") {
+      setRubricFile(f);
+      setRubricText("");
+    } else {
+      setRubricFile(null);
+      const reader = new FileReader();
+      reader.onload = () => setRubricText(reader.result.toString());
+      reader.readAsText(f);
+    }
   };
 
-  // ── Custom highlight tag ──────────────────────────────────────────────
-  const HighlightTag = ({ children, highlightIndex, ...props }) => {
-    const all = [...met, ...missing];
-    const term = all[highlightIndex];
-    const isMet = met.includes(term);
-    return (
-      <Text
-        as="span"
-        bg={isMet ? "green.200" : undefined}
-        textDecoration={isMet ? undefined : "underline"}
-        textDecorationColor={isMet ? undefined : "red.500"}
-        {...props}
-      >
-        {children}
-      </Text>
-    );
+  // ——— Function to split a single section into intro/body/conclusion ———
+  const splitIntoThree = (text) => {
+    const paras = text.split(/\n\s*\n/).filter((p) => p.trim());
+    if (paras.length >= 3) {
+      const intro = paras[0];
+      const conclusion = paras[paras.length - 1];
+      const body = paras.slice(1, -1).join("\n\n");
+      return [
+        { name: "Introduction", text: intro },
+        { name: "Body", text: body },
+        { name: "Conclusion", text: conclusion },
+      ];
+    }
+    const sentences = text.split(/(?<=[.!?])\s+/);
+    const n = sentences.length;
+    const oneThird = Math.floor(n / 3);
+    const intro = sentences.slice(0, oneThird).join(" ");
+    const body = sentences.slice(oneThird, n - oneThird).join(" ");
+    const conclusion = sentences.slice(n - oneThird).join(" ");
+    return [
+      { name: "Introduction", text: intro },
+      { name: "Body", text: body },
+      { name: "Conclusion", text: conclusion },
+    ];
   };
 
-  // ── Main Analysis ─────────────────────────────────────────────────────
+  // ——— Utility to join section text for preview after PDF parse —————
+  const extractTextFromSections = (secs) => secs.map((s) => s.text).join("\n");
+
+  // ——— Main analysis function —————————————————————————————————————
   const runAnalysis = async () => {
     setLoading(true);
     setSections([]);
@@ -124,67 +170,79 @@ export default function App() {
     setMissing([]);
     setSuggestions([]);
 
-    // sanitize into a string[] for the API
-    const rubricArray = rubricItems.map((t) => t.trim()).filter(Boolean);
-
-    // bail if still empty
-    if (rubricArray.length === 0) {
-      alert(
-        "Please provide at least one rubric criterion before running analysis."
-      );
-      setLoading(false);
-      return;
-    }
-
     try {
-      // 1️⃣ Structure call
-      let res = await fetch("/structure", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: essayText }),
-      });
-      if (!res.ok) throw new Error("Structure failed");
-      setSections(await res.json());
+      let rawMatches = [];
 
-      // 2️⃣ Analyze call
-      res = await fetch("/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: essayText, rubric: rubricArray }),
-      });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        console.error(
-          "🛑 /analyze errors:\n",
-          JSON.stringify(errBody, null, 2)
-        );
-        const msg = Array.isArray(errBody)
-          ? errBody.map((e) => e.msg || JSON.stringify(e)).join("; ")
-          : errBody.detail || res.status;
-        throw new Error("Analyze failed: " + msg);
+      if (essayFile && rubricFile) {
+        const form = new FormData();
+        form.append("essay_file", essayFile);
+        form.append("rubric_file", rubricFile);
+
+        const secResponse = await fetch("/structure_pdf", {
+          method: "POST",
+          body: form,
+        });
+        if (!secResponse.ok) throw new Error("PDF structure failed");
+        const pdfSections = await secResponse.json();
+        setSections(pdfSections);
+
+        const matchResponse = await fetch("/analyze_pdf", {
+          method: "POST",
+          body: form,
+        });
+        if (!matchResponse.ok) throw new Error("PDF analysis failed");
+        rawMatches = await matchResponse.json();
+
+        setEssayText(extractTextFromSections(pdfSections));
+      } else {
+        const secRes = await fetch("/structure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: essayText }),
+        });
+        if (!secRes.ok) throw new Error("Structure failed");
+        setSections(await secRes.json());
+
+        const matchRes = await fetch("/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: essayText,
+            rubric: rubricItems.map((t) => t.trim()).filter(Boolean),
+          }),
+        });
+        if (!matchRes.ok) {
+          const err = await matchRes.json().catch(() => ({}));
+          throw new Error(
+            Array.isArray(err)
+              ? err.map((e) => e.msg).join(";")
+              : err.detail || matchRes.status
+          );
+        }
+        rawMatches = await matchRes.json();
       }
 
-      const analysis = await res.json();
-      setMatches(analysis);
+      const enriched = rawMatches.map((m) => ({ ...m, met: m.score > 0 }));
+      setMatches(enriched);
 
-      // 3️⃣ Chart data
       setSemantic(
-        analysis.map((m) => ({
+        enriched.map((m) => ({
           criterion: m.criterion,
-          score: Math.round(m.score * 100),
+          score:
+            m.max_score > 0 ? Math.round((m.score / m.max_score) * 100) : 0,
         }))
       );
 
-      // 4️⃣ Met vs missing
-      const metTexts = analysis.map((m) => m.criterion);
-      setMet(metTexts);
-      setMissing(rubricArray.filter((t) => !metTexts.includes(t)));
-
-      // 5️⃣ Suggestions
+      const metList = enriched
+        .filter((m) => m.met)
+        .map((m) => m.criterion.trim());
+      const missingMatches = enriched.filter((m) => !m.met);
+      setMet(metList);
+      setMissing(missingMatches.map((m) => m.criterion));
       setSuggestions(
-        rubricArray
-          .filter((t) => !metTexts.includes(t))
-          .map((t) => `Consider adding **${t}**.`)
+        missingMatches.map(
+          (m) => m.suggestion || `Consider adding ${m.criterion}.`
+        )
       );
     } catch (err) {
       console.error(err);
@@ -194,13 +252,30 @@ export default function App() {
     }
   };
 
-  // ── Progress bar ──────────────────────────────────────────────────────
-  const pct = rubricItems.length
-    ? Math.round((met.length / rubricItems.length) * 100)
+  // ——— Progress & styling —————————————————————————————————————
+  const pct = matches.length
+    ? Math.round((met.length / matches.length) * 100)
     : 0;
   const colorScheme = pct < 50 ? "red" : pct < 80 ? "orange" : "green";
   const dragBorder = useColorModeValue("blue.300", "blue.600");
 
+  // ——— Highlight tag ———————————————————————————————————————
+  const HighlightTag = ({ children, ...props }) => (
+    <Text as="span" bg="yellow.200" {...props}>
+      {children}
+    </Text>
+  );
+
+  // ——— Build list of snippet texts to highlight —————————————————————
+  const snippetWords = matches.map((m) => m.snippet?.trim()).filter(Boolean);
+
+  // ——— Determine display sections —————————————————————————————————
+  const displaySections =
+    sections.length === 1
+      ? splitIntoThree(sections[0].text)
+      : sections.map((sec) => ({ name: sec.name, text: sec.text }));
+
+  // ——— Render —————————————————————————————————————————————————————
   return (
     <Box p={6}>
       <Heading mb={6}>Rubric Analyzer</Heading>
@@ -213,7 +288,7 @@ export default function App() {
             <Heading size="sm">Essay Input</Heading>
             <Input
               type="file"
-              accept=".txt"
+              accept=".txt,.pdf"
               size="sm"
               onChange={handleEssayUpload}
             />
@@ -225,8 +300,8 @@ export default function App() {
             borderColor={essayDrag ? dragBorder : "transparent"}
             borderRadius="md"
             onDragOver={(e) => e.preventDefault()}
-            onDragEnter={(e) => (e.preventDefault(), setEssayDrag(true))}
-            onDragLeave={(e) => (e.preventDefault(), setEssayDrag(false))}
+            onDragEnter={() => setEssayDrag(true)}
+            onDragLeave={() => setEssayDrag(false)}
             onDrop={essayDrop}
           >
             <Textarea
@@ -244,7 +319,7 @@ export default function App() {
             <Heading size="sm">Rubric Input</Heading>
             <Input
               type="file"
-              accept=".txt"
+              accept=".txt,.pdf"
               size="sm"
               onChange={handleRubricUpload}
             />
@@ -256,8 +331,8 @@ export default function App() {
             borderColor={rubricDrag ? dragBorder : "transparent"}
             borderRadius="md"
             onDragOver={(e) => e.preventDefault()}
-            onDragEnter={(e) => (e.preventDefault(), setRubricDrag(true))}
-            onDragLeave={(e) => (e.preventDefault(), setRubricDrag(false))}
+            onDragEnter={() => setRubricDrag(true)}
+            onDragLeave={() => setRubricDrag(false)}
             onDrop={rubricDrop}
           >
             <Textarea
@@ -270,33 +345,33 @@ export default function App() {
         </Box>
       </Flex>
 
+      {/* Analyze Button */}
       <Tooltip
-        label="Please add at least one criterion to your rubric"
-        isDisabled={rubricItems.length > 0}
+        label="Upload both PDF files or paste text"
+        isDisabled={(essayFile && rubricFile) || (essayText && rubricText)}
       >
         <Button
           colorScheme="blue"
           onClick={runAnalysis}
           isLoading={loading}
           mb={4}
-          isDisabled={rubricItems.length === 0}
-          leftIcon={rubricItems.length === 0 ? <InfoOutlineIcon /> : undefined}
+          isDisabled={!((essayFile && rubricFile) || (essayText && rubricText))}
+          leftIcon={<InfoOutlineIcon />}
         >
           Run Analysis
         </Button>
       </Tooltip>
 
-      {/* Progress */}
+      {/* Progress Bar */}
       <Box mb={6}>
         <Progress value={pct} size="sm" colorScheme={colorScheme} />
         <Text fontSize="xs" mt={1}>
-          {met.length} / {rubricItems.length} criteria met ({pct}%)
+          {met.length} / {matches.length} criteria met ({pct}%)
         </Text>
       </Box>
 
-      {/* Results */}
       <Flex gap={6} align="flex-start">
-        {/* Essay Preview */}
+        {/* Essay Preview with highlighted snippets */}
         <Box
           flex={2}
           p={4}
@@ -304,29 +379,34 @@ export default function App() {
           borderRadius="md"
           minH="300px"
           overflow="auto"
-          fontFamily="mono"
-          whiteSpace="pre-wrap"
         >
           <Heading size="sm" mb={2}>
             Essay Preview
           </Heading>
-          <Highlighter
-            highlightTag={HighlightTag}
-            searchWords={[...met, ...missing]}
-            autoEscape
-            textToHighlight={essayText || "Your essay appears here…"}
-          />
+          {displaySections.map((sec, i) => (
+            <Box key={i} mb={4}>
+              <Heading size="xs" mb={1}>
+                {sec.name}
+              </Heading>
+              <Highlighter
+                highlightTag={HighlightTag}
+                searchWords={snippetWords}
+                autoEscape
+                textToHighlight={sec.text || ""}
+              />
+            </Box>
+          ))}
         </Box>
 
-        {/* Right Panels */}
+        {/* Sidebar */}
         <VStack flex={1} spacing={4} align="stretch">
-          {/* Sections */}
+          {/* Sections Accordion */}
           <Box p={4} bg="gray.50" borderRadius="md">
             <Heading size="sm" mb={2}>
               Sections
             </Heading>
             <Accordion allowToggle>
-              {sections.map((sec, i) => (
+              {displaySections.map((sec, i) => (
                 <AccordionItem key={i}>
                   <AccordionButton>
                     <Box flex="1" textAlign="left">
@@ -351,35 +431,35 @@ export default function App() {
               {matches.map((m, i) => (
                 <AccordionItem key={i} border="none">
                   <AccordionButton
-                    _expanded={{ bg: "green.100" }}
+                    _expanded={{ bg: m.met ? "green.100" : "orange.100" }}
                     px={2}
                     py={1}
                     borderRadius="md"
                   >
-                    <Box
-                      flex="1"
-                      textAlign="left"
-                      display="flex"
-                      alignItems="center"
-                    >
-                      <Icon as={CheckCircleIcon} color="green.500" mr={2} />
-                      {m.criterion} — {Math.round(m.score * 100)}%
+                    <Box flex="1" display="flex" alignItems="center">
+                      <Icon
+                        as={m.met ? CheckCircleIcon : WarningIcon}
+                        color={m.met ? "green.500" : "red.500"}
+                        mr={2}
+                      />
+                      {m.criterion} — {m.score}/{m.max_score}{" "}
+                      {m.met ? "✔️" : "❌"}
                     </Box>
                     <AccordionIcon />
                   </AccordionButton>
                   <AccordionPanel pt={0} pb={2} pl={6}>
-                    <Text fontSize="xs" color="gray.600" mb={1}>
-                      Section: {m.section}
-                    </Text>
-                    <List spacing={1}>
-                      {m.snippets.map((s, j) => (
-                        <ListItem key={j}>
-                          <Text as="i" fontSize="sm">
-                            “{s.sentence.trim()}”
-                          </Text>
-                        </ListItem>
-                      ))}
-                    </List>
+                    {m.snippet ? (
+                      <Highlighter
+                        highlightTag={HighlightTag}
+                        searchWords={[m.snippet.trim()]}
+                        autoEscape
+                        textToHighlight={m.snippet.trim()}
+                      />
+                    ) : (
+                      <Text fontSize="sm" color="gray.500">
+                        No supporting snippet found.
+                      </Text>
+                    )}
                   </AccordionPanel>
                 </AccordionItem>
               ))}
@@ -399,9 +479,23 @@ export default function App() {
                 <XAxis dataKey="criterion" tick={{ fontSize: 12 }} />
                 <YAxis />
                 <ReTooltip formatter={(v) => `${v}%`} />
-                <Bar dataKey="score" fill="#3182CE" />
+                <Bar dataKey="score" fill={chartColor} />
               </BarChart>
             </ResponsiveContainer>
+          </Box>
+
+          {/* Score Details */}
+          <Box p={4} bg="gray.50" borderRadius="md">
+            <Heading size="sm" mb={2}>
+              Score Details
+            </Heading>
+            <List spacing={1}>
+              {matches.map((m, i) => (
+                <ListItem key={i}>
+                  {m.criterion}: {m.score}/{m.max_score}
+                </ListItem>
+              ))}
+            </List>
           </Box>
 
           {/* Met Criteria */}
@@ -412,7 +506,7 @@ export default function App() {
             <List spacing={1}>
               {met.map((c, i) => (
                 <ListItem key={i}>
-                  <ListIcon as={CheckCircleIcon} color="green.500" />
+                  <Icon as={CheckCircleIcon} color="green.500" mr={2} />
                   {c}
                 </ListItem>
               ))}
@@ -427,7 +521,7 @@ export default function App() {
             <List spacing={1}>
               {missing.map((c, i) => (
                 <ListItem key={i}>
-                  <ListIcon as={WarningIcon} color="red.500" />
+                  <Icon as={WarningIcon} color="red.500" mr={2} />
                   {c}
                 </ListItem>
               ))}
@@ -439,7 +533,7 @@ export default function App() {
             <Heading size="sm" mb={2}>
               Suggestions
             </Heading>
-            <List spacing={1} styleType="disc" pl={4}>
+            <List spacing={1} pl={4}>
               {suggestions.map((s, i) => (
                 <ListItem key={i}>{s}</ListItem>
               ))}
