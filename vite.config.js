@@ -5,15 +5,17 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // forward /structure → your FastAPI
-      "/structure": {
-        target: "http://127.0.0.1:8001",
+      "/api": {
+        target: "http://localhost:8000",
         changeOrigin: true,
+        secure: false,
       },
-      "/analyze": {
-        target: "http://127.0.0.1:8001",
-        changeOrigin: true,
-      },
+      "/parse_rubric": "http://localhost:8000",
+      "/parse_rubric_pdf": "http://localhost:8000",
+      "/structure": "http://localhost:8000",
+      "/structure_pdf": "http://localhost:8000",
+      "/score_essay": "http://localhost:8000",
+      "/score_essay_pdf": "http://localhost:8000",
     },
   },
 });
